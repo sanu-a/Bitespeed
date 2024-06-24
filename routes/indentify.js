@@ -20,7 +20,7 @@ route.post("/identify", async (req, res) => {
     }
     return res
       .status(400)
-      .json({ error: true, success: false, message: "Internal server error!" });
+      .json({ error: true, success: false, message: "Internal server error!", msg: err.message });
   }
 });
 
