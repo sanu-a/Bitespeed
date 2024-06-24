@@ -4,8 +4,8 @@
   "main": "index.js",
   "scripts": {
     "devwindows": "SET NODE_ENV=development&& nodemon -r dotenv-flow/config ./index.js",
-    "dev": "NODE_ENV=development nodemon -r dotenv-flow/config src/index.js",
-    "prod": "NODE_ENV=production nodemon -r dotenv-flow/config src/index.js"
+    "dev": "NODE_ENV=development nodemon -r dotenv-flow/config ./index.js",
+    "prod": "NODE_ENV=production nodemon -r dotenv-flow/config ./index.js"
   },
   "author": "Sanu",
   "license": "ISC",
