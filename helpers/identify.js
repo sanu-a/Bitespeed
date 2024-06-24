@@ -1,4 +1,33 @@
+const { Op } = require("sequelize");
 const models = require("../db/models");
+
+/**
+ * checkIfEmailAndPhoneExists
+ * Checks if the phoneNumber and email already present in Contact table
+ * @param {existingContacts, email, phoneNumber}
+ * @returns
+ */
+const checkIfEmailAndPhoneExists = ({
+  existingContacts,
+  email,
+  phoneNumber,
+}) => {
+  let emailExist = false;
+  let phoneExist = false;
+
+  for (const contact of existingContacts) {
+    if (!emailExist && contact.email == email) {
+      emailExist = true;
+    }
+    if (!phoneExist && contact.phoneNumber == phoneNumber) {
+      phoneExist = true;
+    }
+
+    // if both exists return immediately
+    if (emailExist && phoneExist) return true;
+  }
+  return false;
+};
 
 /**
  * getExistingContacts
@@ -17,16 +46,26 @@ const getExistingContacts = async ({ email, phoneNumber }) => {
       raw: true,
     });
   }
+  const filter = { phoneNumber };
+  // filter out already found existing contacts
+  if (emailContact.length > 0) {
+    const ids = emailContact.map((entry) => entry.id);
+    filter.id = { [Op.notIn]: ids };
+  }
+  
   if (phoneNumber) {
     phoneContact = await models.Contact.findAll({
-      where: {
-        phoneNumber,
-      },
+      where: filter,
       raw: true,
     });
   }
+  
   const existingContacts = [...emailContact, ...phoneContact];
-  const emailAndPhoneExist = emailContact.length > 0 && phoneContact.length > 0;
+  const emailAndPhoneExist = checkIfEmailAndPhoneExists({
+    existingContacts,
+    email,
+    phoneNumber,
+  });
   return { existingContacts, emailAndPhoneExist };
 };
 
@@ -56,10 +95,33 @@ const createNewContact = async ({
  * @param {*} existingContacts
  * @returns {primaryEntries}
  */
-const getPrimaryEntries = (existingContacts) => {
-  const primaryEntries = existingContacts.filter(
-    (data) => data.linkPrecedence === "primary"
+const getPrimaryEntries = async (existingContacts) => {
+  // primary contact ids from existing contact
+  const existingPrimaryIds = existingContacts
+    .filter((data) => data.linkPrecedence === "primary")
+    .map((entry) => entry.id);
+
+    // primary contact ids form linked ids of existing secondary contacts
+  const linkedPrimaryIds = existingContacts.map((contact) => {
+    if (contact.linkedId) {
+      return contact.linkedId;
+    }
+  });
+
+  // get unique values
+  const primaryContactIds = Array.from(
+    new Set([...existingPrimaryIds, ...linkedPrimaryIds])
   );
+
+  const primaryEntries = await models.Contact.findAll({
+    where: {
+      id: {
+        [Op.in]: primaryContactIds,
+      },
+    },
+    raw: true,
+  });
+
   return { primaryEntries };
 };
 
@@ -123,6 +185,11 @@ const getSecondaryContactData = async (primaryContactId) => {
  * @returns contact details
  */
 const identifyContact = async ({ email, phoneNumber }, MyError) => {
+  // if no email and phoneNumber then throw error
+  if (!email && !phoneNumber) {
+    throw new MyError("Please provide email or phone number!");
+  }
+
   const { existingContacts, emailAndPhoneExist } = await getExistingContacts({
     email,
     phoneNumber,
@@ -145,7 +212,7 @@ const identifyContact = async ({ email, phoneNumber }, MyError) => {
     };
   }
 
-  const { primaryEntries } = getPrimaryEntries(existingContacts);
+  const { primaryEntries } = await getPrimaryEntries(existingContacts);
   const primaryContactIds = primaryEntries.map((entry) => entry.id);
 
   const { ids, emails, phoneNumbers } = await getSecondaryContactData(
@@ -176,10 +243,20 @@ const identifyContact = async ({ email, phoneNumber }, MyError) => {
   }
 
   // Edge case - email & phone number exists and no need to change precendence (only one primary contact)
-  if (emailAndPhoneExist) {
-    throw new MyError("Email and phone number already exist!");
+  // if no email or phoneNumber present in req and existing contacts found, then return existing contact info
+  if (emailAndPhoneExist || !email || !phoneNumber) {
+    return {
+      contact: {
+        primaryContatctId: primaryEntries[0].id,
+        emails: Array.from(new Set([primaryEntries[0].email, ...emails])),
+        phoneNumbers: Array.from(
+          new Set([primaryEntries[0].phoneNumber, ...phoneNumbers])
+        ),
+        secondaryContactIds: ids,
+      },
+    };
   }
-
+  
   // New information to be added (either new email or new phone number)
   const response = await createNewContact({
     email,
