@@ -52,14 +52,14 @@ const getExistingContacts = async ({ email, phoneNumber }) => {
     const ids = emailContact.map((entry) => entry.id);
     filter.id = { [Op.notIn]: ids };
   }
-  
+
   if (phoneNumber) {
     phoneContact = await models.Contact.findAll({
       where: filter,
       raw: true,
     });
   }
-  
+
   const existingContacts = [...emailContact, ...phoneContact];
   const emailAndPhoneExist = checkIfEmailAndPhoneExists({
     existingContacts,
@@ -101,7 +101,7 @@ const getPrimaryEntries = async (existingContacts) => {
     .filter((data) => data.linkPrecedence === "primary")
     .map((entry) => entry.id);
 
-    // primary contact ids form linked ids of existing secondary contacts
+  // primary contact ids form linked ids of existing secondary contacts
   const linkedPrimaryIds = existingContacts.map((contact) => {
     if (contact.linkedId) {
       return contact.linkedId;
@@ -135,19 +135,36 @@ const changeLinkPrecedence = async ({ primaryEntries }) => {
   // Sort by id to find first entry, since id is PK & auto incrementing
   let contacts = primaryEntries.sort((a, b) => a.id - b.id);
 
-  // Assuming No secondary contact for the below contact
+  // link all the secondary of the second primary contact to the first primary contact
   await models.Contact.update(
     { linkPrecedence: "secondary", linkedId: contacts[0].id },
-    { where: { id: contacts[1].id } }
+    {
+      where: {
+        [Op.or]: [{ id: contacts[1].id }, { linkedId: contacts[1].id }],
+      },
+    }
   );
+
+  const secondaryContacts = await models.Contact.findAll({
+    attributes: ["phoneNumber", "email"],
+    where: { linkedId: contacts[0].id },
+    raw: true,
+  });
+
+  const secondaryPhoneNumber = [];
+  const secondaryEmail = [];
+  secondaryContacts.map((contact) => {
+    secondaryPhoneNumber.push(contact.phoneNumber);
+    secondaryEmail.push(contact.email);
+  });
 
   return {
     id: contacts[0].id,
     email: contacts[0].email,
     phoneNumber: contacts[0].phoneNumber,
     secondaryId: contacts[1].id,
-    secondaryPhoneNumber: contacts[1].phoneNumber,
-    secondaryEmail: contacts[1].email,
+    secondaryPhoneNumber,
+    secondaryEmail,
   };
 };
 
@@ -233,9 +250,9 @@ const identifyContact = async ({ email, phoneNumber }, MyError) => {
     return {
       contact: {
         primaryContatctId: id,
-        emails: Array.from(new Set([email, secondaryEmail, ...emails])),
+        emails: Array.from(new Set([email, ...secondaryEmail])),
         phoneNumbers: Array.from(
-          new Set([phoneNumber, secondaryPhoneNumber, ...phoneNumbers])
+          new Set([phoneNumber, ...secondaryPhoneNumber])
         ),
         secondaryContactIds: Array.from(new Set([secondaryId, ...ids])),
       },
@@ -256,7 +273,7 @@ const identifyContact = async ({ email, phoneNumber }, MyError) => {
       },
     };
   }
-  
+
   // New information to be added (either new email or new phone number)
   const response = await createNewContact({
     email,
